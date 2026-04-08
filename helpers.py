@@ -29,7 +29,7 @@ class Anova():
     def res(self):
         return self.__res
         
-    def __call__(self, *models, test='chisq', dispersion=False):
+    def __call__(self, *models, test='chisq', dispersion=False, verbose=True):
         if len(models) == 1:
             """Testing all submodels"""
 
@@ -109,6 +109,8 @@ class Anova():
             res = self._F_(*models, dispersion=dispersion)
         elif test.lower() == 'rao':
             res = self._rao_(*models)
+        elif test.lower() == 'wald':
+            res = self._wald_(*models)
         elif test.lower() == 'cp':
             res = self._cp_(*models)
         else:
@@ -134,7 +136,7 @@ class Anova():
                                  dfd=np.abs(models[-1].nobs - models[-1].df_model))
 
         return {'resid_df': models[0].df_resid, 'resid_deviance':  models[0].deviance, 'df': models[-1].df_model - models[0].df_model, 'deviance': models[0].deviance - models[-1].deviance,
-                'f_stat': f_stat, 'p_val': p_val,  
+                'F': f_stat, 'p_val': p_val,
                 }
     def _chisq_(self, *models):
         """Performs deviance LRT test leading to Chisq test statistic (known dispersion param)
@@ -148,7 +150,7 @@ class Anova():
         p_val = scipy.stats.chi2.sf(chi2_stat, df=np.abs(models[-1].df_model - models[0].df_model))
 
         return {'resid_df': models[0].df_resid, 'resid_deviance':  models[0].deviance, 'df': models[-1].df_model - models[0].df_model, 'deviance': models[0].deviance - models[-1].deviance,
-                'chi2': chi2_stat,'p_val': p_val}
+                'LRT': chi2_stat, 'p_val': p_val}
 
     def _rao_(self, *models):
         """Performs rao score test"""
@@ -169,7 +171,25 @@ class Anova():
         warnings.warn("Note that rao score statistic may be inccorect. Currently it is Generalized Pearson statistic")
 
         return {'resid_df': models[0].df_resid, 'resid_deviance':  models[0].deviance, 'df': models[-1].df_model - models[0].df_model, 'deviance': models[0].deviance - models[-1].deviance,
-                'rao': chi2_stat,'p_val': p_val}
+                'Rao': chi2_stat, 'p_val': p_val}
+
+    def _wald_(self, *models):
+        """Performs Wald F-test on extra coefficients of the larger model.
+        W = beta_1^T V_11^{-1} beta_1;  F = W / p_1  ~  F(p_1, n - p)
+        """
+        larger  = models[-1] if models[-1].df_model >= models[0].df_model else models[0]
+        smaller = models[0]  if models[-1].df_model >= models[0].df_model else models[-1]
+        extra_names = [nm for nm in larger.params.index if nm not in smaller.params.index]
+        beta1 = larger.params.loc[extra_names].values
+        V11   = larger.cov_params().loc[extra_names, extra_names].values
+        W     = float(beta1 @ np.linalg.solve(V11, beta1))
+        p1    = len(extra_names)
+        F_wald = W / p1
+        p_val  = scipy.stats.f.sf(F_wald, dfn=p1, dfd=larger.df_resid)
+        return {'resid_df': models[0].df_resid, 'resid_deviance': models[0].deviance,
+                'df': models[-1].df_model - models[0].df_model,
+                'deviance': models[0].deviance - models[-1].deviance,
+                'Wald': F_wald, 'p_val': p_val}
 
     def _cp_(self, *models):
         """No p-values just Cp values"""
@@ -299,7 +319,7 @@ class DiagnosticPlots():
         >>> cls.vif_table()
         """
 
-        if not isinstance(results, statsmodels.regression.linear_model.RegressionResultsWrapper) or \
+        if not isinstance(results, statsmodels.regression.linear_model.RegressionResultsWrapper) and \
            not isinstance(results, statsmodels.genmod.generalized_linear_model.GLMResultsWrapper):
             raise TypeError("result must be instance of statsmodels.regression.linear_model.RegressionResultsWrapper  or"
                             " statsmodels.genmod.generalized_linear_model.GLMResultsWrapper object")
