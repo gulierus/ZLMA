@@ -379,16 +379,6 @@ class DiagnosticPlots():
             line_kws={'color': 'red', 'lw': 1, 'alpha': 0.8},
             ax=ax)
 
-        # annotations
-        residual_abs = np.abs(self.residual)
-        abs_resid = np.flip(np.sort(residual_abs))
-        abs_resid_top_3 = abs_resid[:3]
-        for i, _ in enumerate(abs_resid_top_3):
-            ax.annotate(
-                i,
-                xy=(self.y_predict[i], self.residual[i]),
-                color='C3')
-
         ax.set_title('Residuals vs Fitted', fontweight="bold")
         ax.set_xlabel('Fitted values')
         ax.set_ylabel('Residuals')
@@ -406,15 +396,6 @@ class DiagnosticPlots():
 
         QQ = ProbPlot(self.residual_norm)
         QQ.qqplot(line='45', alpha=0.5, lw=1, ax=ax)
-
-        # annotations
-        abs_norm_resid = np.flip(np.argsort(np.abs(self.residual_norm)), 0)
-        abs_norm_resid_top_3 = abs_norm_resid[:3]
-        for r, i in enumerate(abs_norm_resid_top_3):
-            ax.annotate(
-                i,
-                xy=(np.flip(QQ.theoretical_quantiles, 0)[r], self.residual_norm[i]),
-                ha='right', color='C3')
 
         ax.set_title('Normal Q-Q', fontweight="bold")
         ax.set_xlabel('Theoretical Quantiles')
@@ -442,14 +423,6 @@ class DiagnosticPlots():
             line_kws={'color': 'red', 'lw': 1, 'alpha': 0.8},
             ax=ax)
 
-        # annotations
-        abs_sq_norm_resid = np.flip(np.argsort(residual_norm_abs_sqrt), 0)
-        abs_sq_norm_resid_top_3 = abs_sq_norm_resid[:3]
-        for i in abs_sq_norm_resid_top_3:
-            ax.annotate(
-                i,
-                xy=(self.y_predict[i], residual_norm_abs_sqrt[i]),
-                color='C3')
         ax.set_title('Scale-Location', fontweight="bold")
         ax.set_xlabel('Fitted values')
         ax.set_ylabel(r'$\sqrt{|\mathrm{Standardized\ Residuals}|}$');
@@ -459,45 +432,42 @@ class DiagnosticPlots():
         """
         Residual vs Leverage plot
 
-        Points falling outside Cook's distance curves are considered observation that can sway the fit
-        aka are influential.
-        Good to have none outside the curves.
+        Leverage measures how far a point is from the mean of X (influence on fit).
+        Standardized residuals show how poorly the point is fitted.
+        Points with high leverage AND large residuals are influential.
+        Cook's distance threshold 0.5 is shown as point size.
         """
         if ax is None:
             fig, ax = plt.subplots()
 
-        ax.scatter(
+        n = len(self.leverage)
+        p = self.nparams
+        lev_threshold = 2 * p / n  # common rule: leverage > 2p/n is high
+
+        # Size points by Cook's distance
+        cook_scaled = (self.cooks_distance / self.cooks_distance.max()) * 300
+        sc = ax.scatter(
             self.leverage,
             self.residual_norm,
-            alpha=0.5);
+            s=cook_scaled + 20,
+            alpha=0.5,
+            c=self.cooks_distance,
+            cmap='YlOrRd',
+            edgecolors='grey',
+            linewidths=0.3)
+        plt.colorbar(sc, ax=ax, label="Cook's distance", shrink=0.7)
 
-        sns.regplot(
-            x=self.leverage,
-            y=self.residual_norm,
-            scatter=False,
-            ci=False,
-            lowess=True,
-            line_kws={'color': 'red', 'lw': 1, 'alpha': 0.8},
-            ax=ax)
+        # Threshold lines
+        ax.axhline(2,  color='red', lw=1, ls='--', alpha=0.7, label='|std resid| = 2')
+        ax.axhline(-2, color='red', lw=1, ls='--', alpha=0.7)
+        ax.axvline(lev_threshold, color='blue', lw=1, ls=':', alpha=0.7,
+                   label=f'leverage = 2p/n = {lev_threshold:.3f}')
 
-        # annotations
-        leverage_top_3 = np.flip(np.argsort(self.cooks_distance), 0)[:3]
-        for i in leverage_top_3:
-            ax.annotate(
-                i,
-                xy=(self.leverage[i], self.residual_norm[i]),
-                color = 'C3')
-
-        xtemp, ytemp = self.__cooks_dist_line(0.5) # 0.5 line
-        ax.plot(xtemp, ytemp, label="Cook's distance", lw=1, ls='--', color='red')
-        xtemp, ytemp = self.__cooks_dist_line(1) # 1 line
-        ax.plot(xtemp, ytemp, lw=1, ls='--', color='red')
-
-        ax.set_xlim(0, max(self.leverage)+0.01)
-        ax.set_title('Residuals vs Leverage', fontweight="bold")
-        ax.set_xlabel('Leverage')
-        ax.set_ylabel('Standardized Residuals')
-        ax.legend(loc='upper right')
+        ax.set_xlim(0, max(self.leverage) * 1.1)
+        ax.set_title("Residuals vs Leverage", fontweight="bold")
+        ax.set_xlabel("Leverage")
+        ax.set_ylabel("Standardized Residuals")
+        ax.legend(fontsize=8, loc='upper right')
         return ax
 
     def vif_table(self):
